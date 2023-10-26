@@ -6,7 +6,7 @@
 pub mod gen;
 pub mod v1;
 
-use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32};
+use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
 
@@ -31,9 +31,9 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
     let mut dst_ptr: *mut i32 = dst.as_mut_ptr();
     unsafe {
         for &mask in f {
-            let a = _mm256_loadu_epi32(src_ptr);
+            // let a = _mm256_loadu_epi32(src_ptr);
             // 32byte align load
-            // let a = _mm256_load_epi32(src_ptr);
+            let a = _mm256_load_epi32(src_ptr);
             let m = &MASK_ARRAY_0[mask as usize];
             let p = _mm256_permutevar8x32_epi32(a, _mm256_loadu_epi32(m.as_ptr()));
             _mm256_storeu_epi32(dst_ptr, p);
