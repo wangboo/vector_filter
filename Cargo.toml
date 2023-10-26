@@ -14,5 +14,9 @@ criterion = "0.4"
 humanize-bytes = "1.0.5"
 
 [[bench]]
-name = "filter"
+name = "filter_i32"
+harness = false
+
+[[bench]]
+name = "filter_i8"
 harness = false

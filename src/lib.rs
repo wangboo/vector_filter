@@ -6,9 +6,10 @@
 pub mod gen;
 pub mod v1;
 
-use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32};
+use std::{arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_loadu_epi8, _mm_storeu_epi8}, ptr::copy_nonoverlapping};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
+use gen::{MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
 
 use crate::gen::MASK_ARRAY_0;
 
@@ -16,10 +17,12 @@ use crate::gen::MASK_ARRAY_0;
 #[target_feature(enable = "avx512f,avx512vl")]
 #[target_feature(enable = "avx2")]
 pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
-    // len in bit
-    let len = filter.unset_bits();
+    let len = buffer.len() - filter.unset_bits();
     if len == 0 {
         return Buffer::<i32>::default();
+    }
+    if len == buffer.len() {
+        return buffer.clone();
     }
     let mut dst = Vec::with_capacity(len + 8);
     unsafe {
@@ -48,15 +51,53 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
     out 
 }
 
+// #[target_feature(enable = "avx512bw,avx512vl")]
+#[target_feature(enable = "ssse3")]
+pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
+    let len = buffer.len() - filter.unset_bits();
+    if len == 0 {
+        return Buffer::<i8>::default();
+    }
+    if len == buffer.len() {
+        return buffer.clone();
+    }
+    let mut dst = Vec::with_capacity(len + 8);
+    unsafe {
+        dst.set_len(len);
+    }
+    let mut src_ptr = buffer.as_slice().as_ptr();
+    let mut dst_ptr = dst.as_mut_ptr();
+    let chunks = filter.chunks::<u64>();
+    for mask64 in chunks {
+        for i in 0..4 {
+            let mut mask = [0_i8; 16];
+            let mlo = (mask64 >> i*16) as u8;
+            let m0 = &MASK_ARRAY_8_LO[mlo as usize];
+            let mhi = (mask64 >> (i*16+8)) as u8;
+            let m1 = &MASK_ARRAY_8_HI[mhi as usize];
+            let offset = mlo.count_ones() as usize;
+            copy_nonoverlapping(m0.as_ptr(), mask.as_mut_ptr(), offset);
+            copy_nonoverlapping(m1.as_ptr(), mask.as_mut_ptr().add(offset), mhi.count_ones() as _);
+            let p = _mm_shuffle_epi8(
+                _mm_loadu_epi8(src_ptr), 
+                _mm_loadu_epi8(mask.as_ptr()));
+            _mm_storeu_epi8(dst_ptr, p);
+            src_ptr = src_ptr.add(16);
+            dst_ptr = dst_ptr.add(offset + mhi.count_ones() as usize);
+        }
+    }
+
+    let mut out: Buffer<i8> = dst.into();
+    unsafe {
+        out.set_len(len);
+    }
+    out
+}
 
 #[cfg(test)]
 mod test {
-    use std::time::Instant;
-
     use arrow2::bitmap::MutableBitmap;
-    use humanize_bytes::humanize_bytes_binary;
-
-    use crate::{filter_epi32, gen::gen_input};
+    use crate::{filter_epi32, gen::gen_input, filter_epi8};
 
     #[test]
     fn test_filter_i32() {
@@ -76,19 +117,16 @@ mod test {
     }
 
     #[test]
-    fn test_filter_i32_1() {
-        let data_size = 4 * 1024;
-        let i = gen_input(data_size as _);
-        let times = 1000_0;
-        let start_at = Instant::now();
-        for _ in 0..times {
-            unsafe {
-                let _ = filter_epi32(&i.0, &i.1);
-            }
-        }
-        let cost = start_at.elapsed();
-        let speed = (data_size * times * 1000_000_000) / (cost.as_nanos());
-        println!("test: {} times, cost: {}ms, {}", times, cost.as_millis(), humanize_bytes_binary!(speed));
+    fn test_filter_i8() {
+        let data_size = 64;
+        let input = gen_input(data_size, |i| i as i8);
+        let out = unsafe {
+            filter_epi8(&input.0, &input.1)
+        };
+        // println!("expect: {:?}", &input.2);
+        // println!("out   : {:?}", out.as_slice());
+        assert_eq!(input.2.len(), out.len());
+        assert_eq!(input.2.as_slice(), out.as_slice());
     }
 
 }

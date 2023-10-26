@@ -91,14 +91,10 @@ mod test {
     #[test]
     fn test_v1() {
         let len = 1024;
-        let input = gen_input(len);
+        let input = gen_input(len, |i| i as i32);
         let dst = filter_primitive_types(&input.0, &input.1);
-        assert_eq!(len-(&input.1).unset_bits(), dst.len());
-        let expect: Vec<i32> = input.1.iter().zip(input.0.iter())
-            .filter(|(b,_)| *b)
-            .map(|(_,v)| *v)
-            .collect();
-        assert_eq!(expect.as_slice(), &*dst);
+        assert_eq!(input.2.len(), dst.len());
+        assert_eq!(input.2.as_slice(), &*dst);
     }
 
 }
