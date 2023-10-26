@@ -1,8 +1,8 @@
-use std::alloc::{alloc, Layout};
 
-use arrow2::{buffer::Buffer, bitmap::{Bitmap, MutableBitmap}};
+
+
 use criterion::{Criterion, Throughput};
-use vector_filter::{filter_epi32, v1::filter_primitive_types, gen::gen_input};
+use vector_filter::{v1::filter_primitive_types, gen::gen_input};
 
 #[macro_use]
 extern crate criterion;
