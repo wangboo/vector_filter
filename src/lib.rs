@@ -12,7 +12,6 @@ use arrow2::{bitmap::{Bitmap, utils::BitChunksExact}, buffer::Buffer};
 
 use crate::gen::MASK_ARRAY_0;
 
-
 // Bitmap bit 1 means should to be filtered
 #[target_feature(enable = "avx512f,avx512vl")]
 #[target_feature(enable = "avx2")]
@@ -37,7 +36,8 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
             // 32byte align load
             // let a = _mm256_load_epi32(src_ptr);
             for i in 0..8 {
-                let src = _mm256_loadu_epi32(src_ptr.add(i*8));
+                // let src = _mm256_loadu_epi32(src_ptr.add(i*8));
+                let src = _mm256_load_epi32(src_ptr.add(i*8));
                 let m: u8 = (mask64 >> i*8) as u8;
                 let p = _mm256_permutevar8x32_epi32(
                     src, 
@@ -47,7 +47,8 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
                 dst_ptr = dst_ptr.add(m.count_ones() as _);
             }
             src_ptr = src_ptr.offset(64);
-            _mm_prefetch(src_ptr.add(64) as _, _MM_HINT_T0);
+            // prepare next loop data
+            _mm_prefetch(src_ptr.add(256) as _, _MM_HINT_T0);
         }
     }
     let mut out: Buffer<i32> = dst.into();
