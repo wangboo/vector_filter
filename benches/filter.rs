@@ -20,12 +20,12 @@ fn filter(c: &mut Criterion) {
         });
     });
     // v1
-    g.bench_function("v1-databend", |b| {
-        let input = gen_input();
-        b.iter(|| {
-            filter_primitive_types::<i32>(&input.0, &input.1);
-        });
-    });
+    // g.bench_function("v1-databend", |b| {
+    //     let input = gen_input();
+    //     b.iter(|| {
+    //         filter_primitive_types::<i32>(&input.0, &input.1);
+    //     });
+    // });
 }
 
 fn gen_input() -> (Buffer<i32>, Bitmap) {

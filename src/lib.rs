@@ -5,9 +5,9 @@
 pub mod gen;
 pub mod v1;
 
-use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32};
+use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_prefetch, _MM_HINT_T0};
 
-use arrow2::{bitmap::Bitmap, buffer::Buffer};
+use arrow2::{bitmap::{Bitmap, utils::BitChunksExact}, buffer::Buffer};
 
 use crate::gen::MASK_ARRAY_0;
 
@@ -23,20 +23,28 @@ pub fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
     unsafe {
         dst.set_len(len);
     }
-    let (f, offset, _) = filter.as_slice();
+    let (f, offset, f_len) = filter.as_slice();
     debug_assert!(offset == 0, "offset in bit must eq 0");
     let mut src_ptr = buffer.as_slice().as_ptr();
     let mut dst_ptr: *mut i32 = dst.as_mut_ptr();
     unsafe {
-        for &mask in f {
-            let a = _mm256_loadu_epi32(src_ptr);
+        let exact = BitChunksExact::<u64>::new(f, f_len);
+        for mask64 in exact {
+            // try to change to stream load
             // 32byte align load
             // let a = _mm256_load_epi32(src_ptr);
-            let m = &MASK_ARRAY_0[mask as usize];
-            let p = _mm256_permutevar8x32_epi32(a, _mm256_loadu_epi32(m.as_ptr()));
-            _mm256_storeu_epi32(dst_ptr, p);
-            src_ptr = src_ptr.offset(8);
-            dst_ptr = dst_ptr.offset(mask.count_ones() as _);
+            for i in 0..8 {
+                let src = _mm256_loadu_epi32(src_ptr.add(i*8));
+                let m: u8 = (mask64 >> i*8) as u8;
+                let p = _mm256_permutevar8x32_epi32(
+                    src, 
+                    _mm256_loadu_epi32((&MASK_ARRAY_0[m as usize]).as_ptr()));
+                // change to stream store
+                _mm256_storeu_epi32(dst_ptr, p);
+                dst_ptr = dst_ptr.add(m.count_ones() as _);
+            }
+            src_ptr = src_ptr.offset(64);
+            _mm_prefetch(src_ptr.add(64) as _, _MM_HINT_T0);
         }
     }
     let mut out: Buffer<i32> = dst.into();
@@ -49,40 +57,29 @@ pub fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
 
 #[cfg(test)]
 mod test {
-    use std::time::Instant;
 
     use arrow2::bitmap::MutableBitmap;
-    use humanize_bytes::humanize_bytes_binary;
 
-    use crate::{filter_epi32, gen::gen_input};
+    use crate::filter_epi32;
 
     #[test]
     fn test_filter_i32() {
-        let mut v = Vec::with_capacity(32);
-        let mut filter = MutableBitmap::with_capacity(32);
-        for i in 0..32_i32 {
-            v.push(i);
+        let len = 1024;
+        let mut v = Vec::with_capacity(len);
+        let mut filter = MutableBitmap::with_capacity(len);
+        let mut expect = Vec::new();
+        for i in 0..len {
+            v.push(i as i32);
             // 1, 3, 5, 7 ... will keeped
             filter.push(i % 2 == 0);
+            if i%2 == 0 {
+                expect.push(i as i32);
+            }
             // filter.set(i as usize, i % 2 == 0);
         }
         let dst = filter_epi32(&v.into(), &filter.into());
-        assert_eq!(16, dst.len());
-        assert_eq!(&[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30], dst.as_slice());
-    }
-
-    #[test]
-    fn test_filter_i32_1() {
-        let data_size = 4 * 1024;
-        let i = gen_input(data_size as _);
-        let times = 1000_0;
-        let start_at = Instant::now();
-        for _ in 0..times {
-            filter_epi32(&i.0, &i.1);
-        }
-        let cost = start_at.elapsed();
-        let speed = (data_size * times * 1000_000_000) / (cost.as_nanos());
-        println!("test: {} times, cost: {}ms, {}", times, cost.as_millis(), humanize_bytes_binary!(speed));
+        assert_eq!(expect.len(), dst.len());
+        assert_eq!(expect.as_slice(), dst.as_slice());
     }
 
 }
