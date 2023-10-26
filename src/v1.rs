@@ -90,10 +90,15 @@ mod test {
 
     #[test]
     fn test_v1() {
-        let input = gen_input(32);
+        let len = 1024;
+        let input = gen_input(len);
         let dst = filter_primitive_types(&input.0, &input.1);
-        assert_eq!(16, dst.len());
-        assert_eq!(&[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30], &*dst);
+        assert_eq!(len-(&input.1).unset_bits(), dst.len());
+        let expect: Vec<i32> = input.1.iter().zip(input.0.iter())
+            .filter(|(b,_)| *b)
+            .map(|(_,v)| *v)
+            .collect();
+        assert_eq!(expect.as_slice(), &*dst);
     }
 
 }

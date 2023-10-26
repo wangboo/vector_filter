@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 arrow2 = "0.18.0"
-
+rand = "0.8.5"
 criterion = "0.4"
 
 [dev-dependencies]

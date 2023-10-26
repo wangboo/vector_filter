@@ -1,4 +1,5 @@
 use arrow2::{buffer::Buffer, bitmap::{Bitmap, MutableBitmap}};
+use rand::{rngs::ThreadRng, Rng};
 
 
 pub const MASK_ARRAY_0: [[i32; 8]; 256] = [
@@ -262,11 +263,13 @@ pub const MASK_ARRAY_0: [[i32; 8]; 256] = [
 
 pub fn gen_input(data_size: usize) -> (Buffer<i32>, Bitmap) {
     let len = data_size; // 4 * 1024
+    let mut rnd = ThreadRng::default();
     let mut data = Vec::<i32>::with_capacity(len);
     let mut filter = MutableBitmap::with_capacity(len);
+    let true_prob = 0.8;
     for i in 0..len {
         data.push(i as _);
-        filter.push(i%2 == 0);
+        filter.push(rnd.gen_bool(true_prob));
     }
     (data.into(), filter.into())
 }

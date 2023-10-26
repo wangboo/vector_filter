@@ -5,12 +5,11 @@
 pub mod gen;
 pub mod v1;
 
-use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32};
+use std::arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
 
 use crate::gen::MASK_ARRAY_0;
-
 
 // Bitmap bit 1 means should to be filtered
 pub fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
