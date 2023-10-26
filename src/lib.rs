@@ -6,7 +6,7 @@
 pub mod gen;
 pub mod v1;
 
-use std::{arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_loadu_epi8, _mm_storeu_epi8, _mm_loadu_si128, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0}, ptr::copy_nonoverlapping, simd::i8x16};
+use std::{arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_loadu_epi8, _mm_storeu_epi8, _mm_loadu_si128, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128}, ptr::copy_nonoverlapping, simd::i8x16};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
 use gen::{MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
@@ -37,8 +37,8 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
             // let a = _mm256_loadu_epi32(src_ptr);
             // 32byte align load
             let a = _mm256_load_epi32(src_ptr);
-            let m = &MASK_ARRAY_0[mask as usize];
-            let p = _mm256_permutevar8x32_epi32(a, _mm256_loadu_epi32(m.as_ptr()));
+            let b = MASK_ARRAY_0[mask as usize];
+            let p = _mm256_permutevar8x32_epi32(a, b);
             _mm256_storeu_epi32(dst_ptr, p);
             src_ptr = src_ptr.offset(8);
             dst_ptr = dst_ptr.offset(mask.count_ones() as _);
@@ -68,23 +68,30 @@ pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
     let mut src_ptr = buffer.as_slice().as_ptr();
     let mut dst_ptr = dst.as_mut_ptr();
     let chunks = filter.chunks::<u64>();
+    // 128bit mask, f0 use to fast set low u64(8byte) indexes,
+    // f1 use to initialized 32 bytes memory aligned
+    // f2 use to set high indexes
+    union Mask128 {
+        f0: (u64, u64),
+        f1: __m128i,
+        f2: [i8; 16],
+    }
     for mask64 in chunks {
         for i in 0..4 {
-            let mut mask = [0_i8; 16];
+            let mut mask = Mask128{ f1: _mm_setzero_si128() };
             let mlo = (mask64 >> i*16) as u8;
             let mhi = (mask64 >> (i*16+8)) as u8;
             let offset = mlo.count_ones() as usize;
-            copy_nonoverlapping::<u64>(
-                MASK_ARRAY_8_LO.as_ptr().offset(mlo as isize) as _, 
-                mask.as_mut_ptr() as _, 
-                1);
+            // set low indexes
+            mask.f0.0 = MASK_ARRAY_8_LO[mlo as usize];
+            // set hi indexes
             copy_nonoverlapping::<i8>(
                 MASK_ARRAY_8_HI.as_ptr().offset(mhi as isize) as _, 
-                mask.as_mut_ptr().add(offset), 
+                mask.f2.as_mut_ptr().add(offset), 
                 mhi.count_ones() as _);
             let p = _mm_shuffle_epi8(
                 _mm_load_si128(src_ptr  as _), 
-                _mm_load_si128(mask.as_ptr() as _));
+                mask.f1);
             _mm_storeu_si128(dst_ptr as _, p);
             src_ptr = src_ptr.add(16);
             dst_ptr = dst_ptr.add(offset + mhi.count_ones() as usize);
