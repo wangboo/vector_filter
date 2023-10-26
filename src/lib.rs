@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 #![feature(stdsimd)]
 #![feature(int_roundings)]
+#![feature(avx512_target_feature)]
 
 pub mod gen;
 pub mod v1;
@@ -13,7 +14,9 @@ use crate::gen::MASK_ARRAY_0;
 
 
 // Bitmap bit 1 means should to be filtered
-pub fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
+#[target_feature(enable = "avx512f,avx512vl")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
     // len in bit
     let len = filter.unset_bits();
     if len == 0 {
@@ -77,7 +80,9 @@ mod test {
             }
             // filter.set(i as usize, i % 2 == 0);
         }
-        let dst = filter_epi32(&v.into(), &filter.into());
+        let dst = unsafe {
+            filter_epi32(&v.into(), &filter.into())
+        };
         assert_eq!(expect.len(), dst.len());
         assert_eq!(expect.as_slice(), dst.as_slice());
     }
