@@ -1,6 +1,7 @@
 #![feature(portable_simd)]
 #![feature(stdsimd)]
 #![feature(int_roundings)]
+#![feature(avx512_target_feature)]
 
 pub mod gen;
 pub mod v1;
@@ -12,7 +13,9 @@ use arrow2::{bitmap::Bitmap, buffer::Buffer};
 use crate::gen::MASK_ARRAY_0;
 
 // Bitmap bit 1 means should to be filtered
-pub fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
+#[target_feature(enable = "avx512f,avx512vl")]
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
     // len in bit
     let len = filter.unset_bits();
     if len == 0 {
@@ -65,7 +68,9 @@ mod test {
             filter.push(i % 2 == 0);
             // filter.set(i as usize, i % 2 == 0);
         }
-        let dst = filter_epi32(&v.into(), &filter.into());
+        let dst = unsafe {
+            filter_epi32(&v.into(), &filter.into())
+        };
         assert_eq!(16, dst.len());
         assert_eq!(&[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30], dst.as_slice());
     }
@@ -77,7 +82,9 @@ mod test {
         let times = 1000_0;
         let start_at = Instant::now();
         for _ in 0..times {
-            filter_epi32(&i.0, &i.1);
+            unsafe {
+                let _ = filter_epi32(&i.0, &i.1);
+            }
         }
         let cost = start_at.elapsed();
         let speed = (data_size * times * 1000_000_000) / (cost.as_nanos());

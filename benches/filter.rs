@@ -16,7 +16,9 @@ fn filter(c: &mut Criterion) {
     g.bench_function("v2-simd", |b| {
         let input = gen_input();
         b.iter(|| {
-            filter_epi32(&input.0, &input.1);
+            unsafe {
+                let _ = filter_epi32(&input.0, &input.1);
+            }
         });
     });
     // v1
