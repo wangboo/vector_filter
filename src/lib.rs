@@ -6,7 +6,7 @@
 pub mod gen;
 pub mod v1;
 
-use std::{arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_loadu_epi8, _mm_storeu_epi8}, ptr::copy_nonoverlapping};
+use std::{arch::x86_64::{_mm256_loadu_epi32, _mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_loadu_epi8, _mm_storeu_epi8, _mm_loadu_si128, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0}, ptr::copy_nonoverlapping, simd::i8x16};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
 use gen::{MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
@@ -51,7 +51,7 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
     out 
 }
 
-// #[target_feature(enable = "avx512bw,avx512vl")]
+#[target_feature(enable = "sse2")]
 #[target_feature(enable = "ssse3")]
 pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
     let len = buffer.len() - filter.unset_bits();
@@ -61,7 +61,7 @@ pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
     if len == buffer.len() {
         return buffer.clone();
     }
-    let mut dst = Vec::with_capacity(len + 8);
+    let mut dst: Vec<i8> = Vec::with_capacity(len + 8);
     unsafe {
         dst.set_len(len);
     }
@@ -72,19 +72,24 @@ pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
         for i in 0..4 {
             let mut mask = [0_i8; 16];
             let mlo = (mask64 >> i*16) as u8;
-            let m0 = &MASK_ARRAY_8_LO[mlo as usize];
             let mhi = (mask64 >> (i*16+8)) as u8;
-            let m1 = &MASK_ARRAY_8_HI[mhi as usize];
             let offset = mlo.count_ones() as usize;
-            copy_nonoverlapping(m0.as_ptr(), mask.as_mut_ptr(), offset);
-            copy_nonoverlapping(m1.as_ptr(), mask.as_mut_ptr().add(offset), mhi.count_ones() as _);
+            copy_nonoverlapping::<u64>(
+                MASK_ARRAY_8_LO.as_ptr().offset(mlo as isize) as _, 
+                mask.as_mut_ptr() as _, 
+                1);
+            copy_nonoverlapping::<i8>(
+                MASK_ARRAY_8_HI.as_ptr().offset(mhi as isize) as _, 
+                mask.as_mut_ptr().add(offset), 
+                mhi.count_ones() as _);
             let p = _mm_shuffle_epi8(
-                _mm_loadu_epi8(src_ptr), 
-                _mm_loadu_epi8(mask.as_ptr()));
-            _mm_storeu_epi8(dst_ptr, p);
+                _mm_load_si128(src_ptr  as _), 
+                _mm_load_si128(mask.as_ptr() as _));
+            _mm_storeu_si128(dst_ptr as _, p);
             src_ptr = src_ptr.add(16);
             dst_ptr = dst_ptr.add(offset + mhi.count_ones() as usize);
         }
+        _mm_prefetch(src_ptr.add(64), _MM_HINT_T0);
     }
 
     let mut out: Buffer<i8> = dst.into();
