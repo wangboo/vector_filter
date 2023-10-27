@@ -1,4 +1,4 @@
-use std::{arch::x86_64::__m256i, simd::i32x8, mem::transmute};
+use std::{arch::x86_64::{__m256i, _mm_set_epi64x, __m128i}, simd::{i32x8, i64x2}, mem::transmute};
 
 use arrow2::{buffer::Buffer, bitmap::{Bitmap, MutableBitmap}};
 use rand::{rngs::ThreadRng, Rng};
@@ -261,6 +261,17 @@ pub const MASK_ARRAY_0: [__m256i; 256] = [
     gen_init_mm256i([0, 2, 3, 4, 5, 6, 7, 0]),
     gen_init_mm256i([1, 2, 3, 4, 5, 6, 7, 0]),
     gen_init_mm256i([0, 1, 2, 3, 4, 5, 6, 7]),
+];
+
+pub const MASK_ADD: [__m128i; 8] = [
+    gen_add_mask128(0),
+    gen_add_mask128(1),
+    gen_add_mask128(2),
+    gen_add_mask128(3),
+    gen_add_mask128(4),
+    gen_add_mask128(5),
+    gen_add_mask128(6),
+    gen_add_mask128(7),
 ];
 
 pub const MASK_ARRAY_8_LO: [u64; 256] = [
@@ -790,6 +801,14 @@ const fn gen_init_mm256i(a: [i32; 8]) -> __m256i {
 const fn gen_init_u64(a: [i8; 8]) -> u64 {
     unsafe {
         transmute(a)
+    }
+}
+
+const fn gen_add_mask128(i: i8) -> __m128i {
+    unsafe {
+        let mut m128 = [0_i64; 2];
+        m128[1] = transmute([i; 8]);
+        transmute(m128)
     }
 }
 
