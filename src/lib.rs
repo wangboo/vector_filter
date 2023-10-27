@@ -88,7 +88,7 @@ pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
             copy_nonoverlapping::<i8>(
                 MASK_ARRAY_8_HI.as_ptr().offset(mhi as isize) as _, 
                 mask.f2.as_mut_ptr().add(offset), 
-                mhi.count_ones() as _);
+                8);
             let p = _mm_shuffle_epi8(
                 _mm_load_si128(src_ptr  as _), 
                 mask.f1);
