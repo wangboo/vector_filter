@@ -6,17 +6,17 @@
 pub mod gen;
 pub mod v1;
 
-use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8}, ptr::copy_nonoverlapping};
+use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8, _mm256_loadu_epi32}, ptr::copy_nonoverlapping};
+use arrow2::{bitmap::{Bitmap, utils::BitChunksExact}, buffer::Buffer};
 
-use arrow2::{bitmap::Bitmap, buffer::Buffer};
-use gen::{MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
-
-use crate::gen::MASK_ARRAY_0;
+use crate::gen::{MASK_ARRAY_0, MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
 
 // Bitmap bit 1 means should to be filtered
 #[target_feature(enable = "avx512f,avx512vl")]
 #[target_feature(enable = "avx2")]
+#[target_feature(enable = "sse")]
 pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32> {
+    // len in bit
     let len = buffer.len() - filter.unset_bits();
     if len == 0 {
         return Buffer::<i32>::default();
@@ -28,20 +28,30 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
     unsafe {
         dst.set_len(len);
     }
-    let (f, offset, _) = filter.as_slice();
+    let (f, offset, f_len) = filter.as_slice();
     debug_assert!(offset == 0, "offset in bit must eq 0");
     let mut src_ptr = buffer.as_slice().as_ptr();
     let mut dst_ptr: *mut i32 = dst.as_mut_ptr();
     unsafe {
-        for &mask in f {
-            // let a = _mm256_loadu_epi32(src_ptr);
+        let exact = BitChunksExact::<u64>::new(f, f_len);
+        for mask64 in exact {
+            // try to change to stream load
             // 32byte align load
-            let a = _mm256_load_epi32(src_ptr);
-            let b = MASK_ARRAY_0[mask as usize];
-            let p = _mm256_permutevar8x32_epi32(a, b);
-            _mm256_storeu_epi32(dst_ptr, p);
-            src_ptr = src_ptr.offset(8);
-            dst_ptr = dst_ptr.offset(mask.count_ones() as _);
+            // let a = _mm256_load_epi32(src_ptr);
+            for i in 0..8 {
+                // let src = _mm256_loadu_epi32(src_ptr.add(i*8));
+                let src = _mm256_loadu_epi32(src_ptr.add(i*8));
+                let m: u8 = (mask64 >> i*8) as u8;
+                let p = _mm256_permutevar8x32_epi32(
+                    src, 
+                    MASK_ARRAY_0[m as usize]);
+                // change to stream store
+                _mm256_storeu_epi32(dst_ptr, p);
+                dst_ptr = dst_ptr.add(m.count_ones() as _);
+            }
+            src_ptr = src_ptr.offset(64);
+            // prepare next loop data
+            _mm_prefetch(src_ptr.add(256) as _, _MM_HINT_T0);
         }
     }
     let mut out: Buffer<i32> = dst.into();
@@ -51,6 +61,7 @@ pub unsafe fn filter_epi32(buffer: &Buffer<i32>, filter: &Bitmap) -> Buffer<i32>
     out 
 }
 
+#[target_feature(enable = "sse")]
 #[target_feature(enable = "sse2")]
 #[target_feature(enable = "ssse3")]
 pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
@@ -106,7 +117,7 @@ pub unsafe fn filter_epi8(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
     out
 }
 
-
+#[target_feature(enable = "sse")]
 #[target_feature(enable = "sse2")]
 #[target_feature(enable = "ssse3")]
 pub unsafe fn filter_epi8_1(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> {
@@ -164,39 +175,29 @@ pub unsafe fn filter_epi8_1(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> 
 
 #[cfg(test)]
 mod test {
-    use arrow2::bitmap::MutableBitmap;
+
     use crate::{filter_epi32, gen::gen_input, filter_epi8_1};
-    
 
     #[test]
     fn test_filter_i32() {
-        let mut v = Vec::with_capacity(32);
-        let mut filter = MutableBitmap::with_capacity(32);
-        for i in 0..32_i32 {
-            v.push(i);
-            // 1, 3, 5, 7 ... will keeped
-            filter.push(i % 2 == 0);
-            // filter.set(i as usize, i % 2 == 0);
-        }
+        let len = 1024;
+        let (buffer, bitmap, expect) = gen_input(len, |i| i as _);
         let dst = unsafe {
-            filter_epi32(&v.into(), &filter.into())
+            filter_epi32(&buffer, &bitmap)
         };
-        assert_eq!(16, dst.len());
-        assert_eq!(&[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30], dst.as_slice());
+        assert_eq!(expect.len(), dst.len());
+        assert_eq!(expect.as_slice(), dst.as_slice());
     }
 
     #[test]
     fn test_filter_i8() {
-        let data_size = 64;
-        let input = gen_input(data_size, |i| i as i8);
-        let out = unsafe {
-            // filter_epi8(&input.0, &input.1)
-            filter_epi8_1(&input.0, &input.1)
+        let len = 1024;
+        let (buffer, bitmap, expect) = gen_input(len, |i| i as _);
+        let dst = unsafe {
+            filter_epi8_1(&buffer, &bitmap)
         };
-        // println!("expect: {:?}", &input.2);
-        // println!("out   : {:?}", out.as_slice());
-        assert_eq!(input.2.len(), out.len());
-        assert_eq!(input.2.as_slice(), out.as_slice());
+        assert_eq!(expect.len(), dst.len());
+        assert_eq!(expect.as_slice(), dst.as_slice());
     }
 
 }
