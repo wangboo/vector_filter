@@ -6,7 +6,7 @@
 pub mod gen;
 pub mod v1;
 
-use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8, _mm256_loadu_epi32}, ptr::copy_nonoverlapping};
+use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8, _mm256_loadu_epi32}, ptr::copy_nonoverlapping};
 use arrow2::{bitmap::{Bitmap, utils::BitChunksExact}, buffer::Buffer};
 
 use crate::gen::{MASK_ARRAY_0, MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
