@@ -6,7 +6,7 @@
 pub mod gen;
 pub mod v1;
 
-use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _mm_set_epi8, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8, _mm_slli_epi64}, ptr::copy_nonoverlapping, mem::transmute};
+use std::{arch::x86_64::{_mm256_permutevar8x32_epi32, _mm256_storeu_epi32, _mm256_load_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_load_si128, _mm_prefetch, _MM_HINT_T0, __m128i, _mm_setzero_si128, _mm_set_epi64x, _mm_add_epi8}, ptr::copy_nonoverlapping};
 
 use arrow2::{bitmap::Bitmap, buffer::Buffer};
 use gen::{MASK_ARRAY_8_LO, MASK_ARRAY_8_HI};
@@ -135,7 +135,7 @@ pub unsafe fn filter_epi8_1(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> 
             union Mask {
                 f0: __m128i,
                 f1: u128,
-            };
+            }
             // eg: [0,0,0,0,0,0,0,0,8,9,0,0,0,0,0,0]
             let mut idx_hi = Mask {
                 f0: _mm_set_epi64x(MASK_ARRAY_8_HI[mhi as usize] as _, 0)
@@ -165,8 +165,8 @@ pub unsafe fn filter_epi8_1(buffer: &Buffer<i8>, filter: &Bitmap) -> Buffer<i8> 
 #[cfg(test)]
 mod test {
     use arrow2::bitmap::MutableBitmap;
-    use crate::{filter_epi32, gen::gen_input, filter_epi8, filter_epi8_1};
-    use std::arch::{asm, x86_64::{_mm_loadu_si128, __m128i, _mm256_slli_epi16}};
+    use crate::{filter_epi32, gen::gen_input, filter_epi8_1};
+    
 
     #[test]
     fn test_filter_i32() {

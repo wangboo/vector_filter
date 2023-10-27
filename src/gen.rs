@@ -1,4 +1,4 @@
-use std::{arch::x86_64::{__m256i, _mm_set_epi64x, __m128i}, simd::{i32x8, i64x2}, mem::transmute};
+use std::{arch::x86_64::{__m256i}, simd::{i32x8}, mem::transmute};
 
 use arrow2::{buffer::Buffer, bitmap::{Bitmap, MutableBitmap}};
 use rand::{rngs::ThreadRng, Rng};
